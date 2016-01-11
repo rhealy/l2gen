@@ -85,6 +85,9 @@ typedef struct param_table {
     /* total transmittances of all gases that match the     *
 *                         resolutions of imaging spectrometers */
      t_array  *trntbl;
+     float water_vapor;     // returned water vapor value from get_atrem
+     int  ja,jb;            // indices to tran_table from get_atrem
+     float f1a,f2a,f1b,f2b; // fractions for interpolation of transmittances in tran_table from get_atrem
 } paramstr;
 
 float get_atrem(float *tg_tot, float *rhot, paramstr P);
@@ -175,6 +178,10 @@ extern struct {
 } geometry4_;
 extern struct {
     float senzn_l2,senaz_l2,solzn_l2;
+    float water_vapor;
+    int  ja,jb;
+    int  splitpaths;
+    float f1a,f2a,f1b,f2b;
 } geometry_l2gen_;
 extern struct {
     float tpvmr[81][7];

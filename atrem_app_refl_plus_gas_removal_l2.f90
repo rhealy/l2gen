@@ -474,9 +474,11 @@
         NB = TPVMR(MODEL,1)
         DO 120 I=1,NB
           H(I) = TPVMR(MODEL,2+(4*(I-1)))
-          P(I) = TPVMR(MODEL,3+(4*(I-1)))
+          !Convert the atmospheric pressure from "mb" to "atm.":
+          P(I) = TPVMR(MODEL,3+(4*(I-1))) / 1013.
           T(I) = TPVMR(MODEL,4+(4*(I-1)))
-          VMR(I) = TPVMR(MODEL,5+(4*(I-1)))
+          !Convert the VMR from the ppm unit in the model to absolute unit
+          VMR(I) = TPVMR(MODEL,5+(4*(I-1)))*1.0E-06
   120   CONTINUE
       NL=NB-1
 
@@ -564,14 +566,16 @@
 !C--      END DO
 
 !C--- Convert the atmospheric pressure from "mb" to "atm.":
-      DO I = 1, NB
-         P(I) = P(I) / 1013.
-      END DO
+!      Moved this conversion to GET_INPUT and init_tpvmr - rjh 1/8/2016
+!      DO I = 1, NB
+!         P(I) = P(I) / 1013.
+!      END DO
 !C--- End of conversion
 
 !C     Convert the VMR from the ppm unit in the model to absolute unit.
-      DO 310 I=1,NB
-  310   VMR(I)=VMR(I)*1.0E-06
+!      Moved this conversion to GET_INPUT and init_tpvmr - rjh 1/8/2016
+!      DO 310 I=1,NB
+!  310   VMR(I)=VMR(I)*1.0E-06
 
 !C     Do special processing if surface altitude is greater than 0
 !C---      IF(HSURF.NE.0.0) THEN
@@ -817,13 +821,14 @@
       COMMON /MODEL_ADJ1/ CLMVAP,Q
       COMMON /GEOMETRY1/ SOLZNI,SOLAZ,OBSZNI,OBSPHI,IDAY
       COMMON /GEOMETRY2/ GCO2,GO3,GN2O,GCO,GCH4,GO2,SSH2O,TOTLO3,GGEOM
-
       COMMON /MODEL_ADJ3/ K_PLANE, DVAP_PLANE, DVAP_LAYER, &
                           DP_PLANE, DP_LAYER, CLMVAPP
 
       DIMENSION G_VAP(25), G_OTHER(25)
       COMMON /GEOMETRY3/ G_VAP, G_OTHER, G_VAP_EQUIV
       COMMON /GEOMETRY4/VAP_SLANT_MDL
+      REAL   MU,MU0, SSH2O_S(NH2O_MAX,2)
+      COMMON /GEOMETRY5/MU,MU0,SSH2O_S
       REAL XPSS, XPPP
       COMMON /GETINPUT14/ XPSS, XPPP
  
@@ -854,10 +859,11 @@
 
 !      write(91,*) 'KPLANE=',k_plane
 
-      GGEOM  = 1./COS(SOLZNI) + 1./COS(OBSZNI)
-
+      MU0 = 1./COS(SOLZNI)
+      MU  = 1./COS(OBSZNI)
+      GGEOM  = MU0 + MU
       write(91,*) 'GGEOM =',GGEOM,' OBSZNI = ',OBSZNI, ' OBSPHI = ',OBSPHI, &
-       'solzni=',solzni,' degrees'
+       'solzni=',solzni,' degrees :: MU0, MU = ',MU0, MU
 
       GCO2   = GGEOM
 
@@ -910,6 +916,8 @@
 !C    Sun-surface-plane ray path.
 !C
       VAP_SLANT_MDL = CLMVAP/COS(SOLZNI) + CLMVAPP/COS(OBSZNI)
+      VAP_SOL = WTRVPR*MU0
+      VAP_SEN = WTRVPR*MU
 !      write(91,*) 'VAP_SLANT_MDL =', VAP_SLANT_MDL, ' cm ', SLANT_MDL
 !C
 !C The "equivalent" geometrical factor corresponding to the total
@@ -917,10 +925,15 @@
 !C
       G_VAP_EQUIV = VAP_SLANT_MDL / CLMVAP
        write(91,*) 'G_VAP_EQUIV = ', G_VAP_EQUIV, VAP_SLANT_MDL, CLMVAP
+       write(91,*) 'VAP_SOL,VAP_SEN = ', VAP_SOL, VAP_SEN, WTRVPR
 
       DO 310 I=1,NH2O_MAX
         SSH2O(I) = VAP_SLANT(I) / VAP_SLANT_MDL
+        SSH2O_S(I,1) = VAPVRT(I) / VAP_SOL
+        SSH2O_S(I,2) = VAPVRT(I) / VAP_SEN
         write(91,*) 'SSH2O(I), I = ', SSH2O(I), I, VAP_SLANT_MDL
+        write(91,*) 'SSH2O_S(I,1), I = ', SSH2O_S(I,1), I
+        write(91,*) 'SSH2O_S(I,2), I = ', SSH2O_S(I,2), I
   310 CONTINUE
 
 !C Calculate the number of days that have passed in this year.  Take leap year
@@ -1044,6 +1057,7 @@
       COMMON /GETINPUT6/ WNDOW1,WNDOW2,WP94C,WNDOW3,WNDOW4,W1P14C
       COMMON /GETINPUT7/ NB1,NB2,NBP94,NB3,NB4,NB1P14
       COMMON /GEOMETRY2/ GCO2,GO3,GN2O,GCO,GCH4,GO2,SSH2O,TOTLO3,GGEOM
+
       COMMON /MODEL_ADJ1/ CLMVAP,Q
 
       COMMON /INIT_SPECCAL3/ NH2O
@@ -1679,20 +1693,32 @@
       COMMON /INIT_SPECCAL5/ DP,PM,TM,VMRM
       COMMON /MODEL_ADJ1/ CLMVAP,Q
       COMMON /MODEL_ADJ4/ K_SURF
+      COMMON /MODEL_ADJ3/ K_PLANE, DVAP_PLANE, DVAP_LAYER, &
+                          DP_PLANE, DP_LAYER, CLMVAPP
 
       DIMENSION SSH2O(NH2O_MAX)
       DIMENSION VAPTOT(NH2O_MAX), R0P94(NH2O_MAX), R1P14(NH2O_MAX), TRNTBL(NOBS_MAX,NH2O_MAX), &
                  TRAN_KD(NOBS_MAX,NH2O_MAX), DIFF_TRAN(NOBS_MAX,NH2O_MAX),TRH2(NOBS_MAX,NH2O_MAX), &
                  TRNTBLO(NOBS_MAX)
       COMMON /TRAN_TABLE1/ SH2O,VAPTOT,R0P94,R1P14,TRNTBL,TRAN_KD, DIFF_TRAN,TRNTBLO
-      COMMON /TRANCAL1/ VAPTT,ITRNDX
+      !COMMON /TRANCAL1/ VAPTT
+
+      ! Split path transmittance
+      ! Just need the values for the two table entries calculated on call to get_atrem
+      ! rjh - 1/11/2016
+      REAL   TRAN_HI_SA(NP_HI,2),TRAN_HI_SB(NP_HI,2)
+      COMMON /TRAN_TABLES/TRAN_HI_SA,TRAN_HI_SB
+      REAL   MU,MU0,SSH2O_S(NH2O_MAX,2),VMRM_S(25,2)
+      COMMON /GEOMETRY5/MU,MU0,SSH2O_S
+
       COMMON /GEOMETRY2/ GCO2,GO3,GN2O,GCO,GCH4,GO2,SSH2O,TOTLO3,GGEOM
       COMMON /GEOMETRY3/ G_VAP, G_OTHER, G_VAP_EQUIV
       COMMON /GEOMETRY4/VAP_SLANT_MDL
+
       INTEGER start(3)
       INTEGER cnt(3)
       CHARACTER(len=4096) :: filename
-      DIMENSION SUMCF(NP_HI)
+      DIMENSION SUMCF(NP_HI), SUMCF_S(NP_HI,2)
       REAL ABSCF_H2O(NP_HI,19)
 
       REAL, ALLOCATABLE :: TG(:), TKCDF(:,:,:),DIFFT(:,:),SUM_KD(:),F1(:),F2(:),TKCDFC(:,:,:)
@@ -1851,6 +1877,19 @@
 !C Scale the VMRM by the two-way path geometrical factors. The geometric
 !C           factors, G_VAP, varies with atmospheric layer number for
 !C           aircraft observational geometries.
+         if (ISPLITP.ne.0) then      ! perform the split path calculations
+             VMRM_S(I,1) = VMRM(I)*MU0
+             if (I.lt.K_PLANE) THEN
+                VMRM_S(I,2) = VMRM(I)*MU
+             else
+                if (I.eq.K_PLANE) THEN
+                    VMRM_S(I,2) + VMRM(I)*MU*DVAP_PLANE/DVAP_LAYER
+                else
+                    VMRM_S(I,2) = 0
+                end if
+             END IF
+             WRITE(91,*) 'VMRM SOL, OBS=',VMRM_S(I,1),VMRM_S(I,2)
+         end if
          VMRM(I) = VMRM(I)*G_VAP(I)
          WRITE(91,*) 'VMRM=',VMRM(I)
       END DO
@@ -1860,8 +1899,16 @@
         !C For each water vapor amount, calculate the geometrically adjusted water
         !C     vapor amount, the channel ratios, and the transmittance spectrum.
               SUMCF(:)    = 0
+              IF (ISPLITP.NE.0) THEN
+                SUMCF_S(:,1)    = 0
+                SUMCF_S(:,2)    = 0
+              END IF
               DO J = K_SURF, 19
                  SUMCF(:) = SUMCF(:) - ABSCF_H2O(:,J)*DP(J-K_SURF+1)*VMRM(J-K_SURF+1)
+                 IF (ISPLITP.NE.0) THEN
+                    SUMCF_S(:,1) = SUMCF_S(:,1) - ABSCF_H2O(:,J)*DP(J-K_SURF+1)*VMRM_S(J-K_SURF+1,1)
+                    SUMCF_S(:,2) = SUMCF_S(:,2) - ABSCF_H2O(:,J)*DP(J-K_SURF+1)*VMRM_S(J-K_SURF+1,2)
+                 END IF
               END DO
 
               DO  I=1,NH2O
@@ -1878,6 +1925,18 @@
 !         write(91,*) 'VAPTT=',VAPTOT(I),SSH2O(I),VAP_SLANT_MDL
 
            END DO
+
+           if (ISPLITP.ne.0) then      ! perform the split path calculations
+                DO J=1,2
+
+                    TRAN_HI_SA(:,J) = EXP(SUMCF_S(:,J)*SSH2O_S(JA_L2,J) * Q * 28.966 / &
+                            6.0225E+23 / 1.0E-06)
+
+                    TRAN_HI_SB(:,J) = EXP(SUMCF_S(:,J)*SSH2O_S(JB_L2,J) * Q * 28.966 / &
+                            6.0225E+23 / 1.0E-06)
+                END DO
+
+           endif
 
      endif
      if (IFULLCALC.eq.0) then
@@ -2247,6 +2306,14 @@
 
       COMMON /GETINPUT5/ NOBS,IFULLCALC,HSURF,DLT,DLT2
 
+      REAL   TRAN_HI_SA(NP_HI,2),TRAN_HI_SB(NP_HI,2),TRANTBL_S(NOBS_MAX,2)
+      COMMON /TRAN_TABLES/TRAN_HI_SA,TRAN_HI_SB,TRANTBL_S
+      REAL   TRAN_MED_INDEX_SA(NP_MED,2),TRAN_MED_INDEX_SB(NP_MED,2),TRAN_MED_SA(NP_MED,2), &
+              TRAN_MED_SB(NP_MED,2),TRAN_STD_SA(NP_MED,2),TRAN_STD_SB(NP_MED,2),             &
+              TRAN_IA_SA(2),TRAN_IA_SB(2),TRAN_IAP1_SA(2),TRAN_IAP1_SB(2)
+      COMMON /TRAN_TABLES1/TRAN_MED_INDEX_SA,TRAN_MED_INDEX_SB,TRAN_MED_SA,TRAN_MED_SB, &
+              TRAN_STD_A,TRAN_STD_B
+
       INTEGER FIRST/1/,IA(NOBS_MAX)
       SAVE FIRST, IA
 
@@ -2339,6 +2406,11 @@
 !C      water vapor amounts is calculated in this subroutine.
 
      TRAN_MED_INDEX(:,:)  = 0.0
+     IF(ISPLITP.NE.0) THEN
+         TRAN_MED_INDEX_SA(:,:)  = 0.0
+         TRAN_MED_INDEX_SB(:,:)  = 0.0
+     END IF
+
 
      DO  J =1, NP_MED
 
@@ -2347,6 +2419,12 @@
           DO 491 K = ndx1,ndx2
              TRAN_MED_INDEX(J,:) = TRAN_MED_INDEX(J,:) + TRAN_HI(K,:)*  &
                           FINSTR_WAVNO(K-INDEX_MED(J)+NCVHF_WAVNO(J),J)
+              IF(ISPLITP.NE.0) THEN
+                 TRAN_MED_INDEX_SA(J,:) = TRAN_MED_INDEX_SA(J,:) + TRAN_HI_SA(K,:)*  &
+                          FINSTR_WAVNO(K-INDEX_MED(J)+NCVHF_WAVNO(J),J)
+                 TRAN_MED_INDEX_SB(J,:) = TRAN_MED_INDEX_SB(J,:) + TRAN_HI_SB(K,:)*  &
+                          FINSTR_WAVNO(K-INDEX_MED(J)+NCVHF_WAVNO(J),J)
+              END IF
  491      CONTINUE
      END DO
 
@@ -2356,15 +2434,29 @@
 !C
          TRAN_MED(1,:)      = TRAN_MED_INDEX(1,:)
          TRAN_MED(NP_MED,:) = TRAN_MED_INDEX(NP_MED,:)
+         IF(ISPLITP.NE.0) THEN
+            TRAN_MED_SA(1,:)      = TRAN_MED_INDEX_SA(1,:)
+            TRAN_MED_SA(NP_MED,:) = TRAN_MED_INDEX_SA(NP_MED,:)
+            TRAN_MED_SB(1,:)      = TRAN_MED_INDEX_SB(1,:)
+            TRAN_MED_SB(NP_MED,:) = TRAN_MED_INDEX_SB(NP_MED,:)
+         ENDIF
 
       DO J = 2, NP_MED-1
          IF(WAVLN_MED_INDEX(J).LE.WAVLN_MED(J)) THEN
            TRAN_MED(J,:) = TRAN_MED_INDEX(J,:)
+           IF(ISPLITP.NE.0) THEN
+                TRAN_MED_SA(J,:) = TRAN_MED_INDEX_SA(J,:)
+                TRAN_MED_SB(J,:) = TRAN_MED_INDEX_SB(J,:)
+           ENDIF
          ELSE
            DLT  =  WAVLN_MED_INDEX(J) - WAVLN_MED_INDEX(J-1)
            FJM1 = (WAVLN_MED_INDEX(J) - WAVLN_MED(J))        /DLT
            FJ   = (WAVLN_MED(J)       - WAVLN_MED_INDEX(J-1))/DLT
            TRAN_MED(J,:) = FJM1*TRAN_MED_INDEX(J-1,:) + FJ*TRAN_MED_INDEX(J,:)
+           IF(ISPLITP.NE.0) THEN
+                TRAN_MED_SA(J,:) = FJM1*TRAN_MED_INDEX_SA(J-1,:) + FJ*TRAN_MED_INDEX_SA(J,:)
+                TRAN_MED_SB(J,:) = FJM1*TRAN_MED_INDEX_SB(J-1,:) + FJ*TRAN_MED_INDEX_SB(J,:)
+           ENDIF
 !C---
 !C---           print*,j,fjm1,fj
 !C---
@@ -2382,6 +2474,17 @@
           TRAN_STD(I,:) = TRAN_STD(I,:)*TRAN_MED(I-NPSHIF,:)
        END DO
 
+       IF(ISPLITP.NE.0) THEN
+          DO I = 1, NP_STD
+           TRAN_STD_SA(I,:) = 1.
+           TRAN_STD_SB(I,:) = 1.
+          END DO
+          DO I = NPSHIF+1, NP_STD
+            TRAN_STD_SA(I,:) = TRAN_STD_SA(I,:)*TRAN_MED_SA(I-NPSHIF,:)
+            TRAN_STD_SB(I,:) = TRAN_STD_SB(I,:)*TRAN_MED_SB(I-NPSHIF,:)
+          END DO
+       ENDIF
+
  
 
 !C The 2nd stage of smoothing - smooth the medium resolution spectrum (resolution
@@ -2392,10 +2495,17 @@
 !C
       DO 1466 J =1, NOBS
 
-             TRNTBL(J,:) = 0.0
-             TRAN_IA(:)     = 0.0
-             TRAN_IAP1(:)   = 0.0
+             TRNTBL(J,:)       = 0.0
+             TRAN_IA(:)        = 0.0
+             TRAN_IAP1(:)      = 0.0
 
+       IF(ISPLITP.NE.0) THEN
+             TRNTBL_S(J,:)     = 0.0
+             TRAN_IA_SA(:)     = 0.0
+             TRAN_IAP1_SA(:)   = 0.0
+             TRAN_IA_SB(:)     = 0.0
+             TRAN_IAP1_SB(:)   = 0.0
+       ENDIF
 !C---
 !C---        print*,'J= ',j, 'NCVHF =', NCVHF(J), 'NCVTOT=',NCVTOT
     
@@ -2415,6 +2525,12 @@
           DO 1491 K = IA(J)-(NCVHF(J)-1), IA(J)+NCVHF(J)-1
              TRAN_IA(:) = TRAN_IA(:) + TRAN_STD(K,:)* &
                           FINSTR(K-IA(J)+NCVHF(J),J)
+             IF(ISPLITP.NE.0) THEN
+                 TRAN_IA_SA(:) = TRAN_IA_SA(:) + TRAN_STD_SA(K,:)* &
+                          FINSTR(K-IA(J)+NCVHF(J),J)
+                 TRAN_IA_SB(:) = TRAN_IA_SB(:) + TRAN_STD_SB(K,:)* &
+                          FINSTR(K-IA(J)+NCVHF(J),J)
+             ENDIF
 
 !C---             IF(J.eq.1) then
 !C---          print*,'j =', j, 'K = ',K, ' IA= ',IA,
@@ -2428,6 +2544,12 @@
           DO 1492 K = IA_P1-(NCVHF(J)-1), IA_P1+NCVHF(J)-1
              TRAN_IAP1(:) = TRAN_IAP1(:) + TRAN_STD(K,:)* &
                           FINSTR(K-IA_P1+NCVHF(J),J)
+             IF(ISPLITP.NE.0) THEN
+                TRAN_IAP1_SA(:) = TRAN_IAP1_SA(:) + TRAN_STD_SA(K,:)* &
+                          FINSTR(K-IA_P1+NCVHF(J),J)
+                TRAN_IAP1_SB(:) = TRAN_IAP1_SB(:) + TRAN_STD_SB(K,:)* &
+                          FINSTR(K-IA_P1+NCVHF(J),J)
+             ENDIF
 1492      CONTINUE
 !C
 !C Linear interpolation to get TRNCAL from TRAN_IA and TRAN_IAP1:
@@ -2437,7 +2559,10 @@
 !C          FIA_P1  = (WAVOBS(J)     - WAVLN_STD(IA))/DLT_IA
            FIA_P1  = 1. - FIA
            TRNTBL(J,:) = FIA*TRAN_IA(:) + FIA_P1*TRAN_IAP1(:)
-
+           IF(ISPLITP.NE.0) THEN
+            TRNTBLSA(:) = FIA*TRAN_IA_SA(:) + FIA_P1*TRAN_IAP1_SA(:)
+            TRNTBLSB(:) = FIA*TRAN_IA_SB(:) + FIA_P1*TRAN_IAP1_SB(:)
+            TRNTBL_S(J,:) = F1A*TRNTBLSA(:) + F1TRNTBLSB(:)
            IF (IFULLCALC.eq.0) THEN
            do K=1,NH2O_MAX
              !! TRAN_KD(J,K) = TRAN_KD(J,K)*DIFF_TRAN(J,K)

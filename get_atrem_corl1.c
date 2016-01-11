@@ -254,6 +254,18 @@ int get_atrem_cor (int32_t sensorID, l1str *l1rec, int32_t ip, float *rhot, floa
         }
     }
     l1rec->wv[ip] = get_atrem(tg_tot, rhot, P); //returns water vapor(cm)
+
+    // Calculate the separate path transmittances (solar and sensor) if selected
+    if (l1rec->input->atrem_splitpaths) {
+        geometry_l2gen_.water_vapor = l1rec->wv[ip];
+        geometry_l2gen_.ja = P.ja;
+        geometry_l2gen_.jb = P.jb;
+        geometry_l2gen_.f1a = P.f1a;
+        geometry_l2gen_.f1b = P.f1b;
+        geometry_l2gen_.f2a = P.f2a;
+        geometry_l2gen_.f2b = P.f2b;
+
+    }
     //printf("Water vapor[%d]=%f\n",ip,l1rec->wv[ip]);
     //printf("Processed get_atrem after %6.0f seconds\n",now()-start_time);
 
@@ -462,8 +474,12 @@ float  get_atrem(float *tg_tot, float *rhot, paramstr P) {
           //printf("RJH: Atrem: %d %f YY=%f %f %f\n",i,tg_tot[i],rhot[i],rhot[i]/specav,rhot[i]-rhot[i]/specav);
       }
 
-
-
+      P.ja  = ja;
+      P.jb  = jb;
+      P.f1a = fja;
+      P.f2a = fjap1;
+      P.f1b = fjb;
+      P.f2b = fjbp1;
 
 
 /*
@@ -599,9 +615,11 @@ int init_tpvmr(int model) {
 
     for (i=0; i<nb;i++) {
         getinput3_.h[i]   = tpvmr_init1_.tpvmr[1+(4*i)][model];
-        getinput3_.p[i]   = tpvmr_init1_.tpvmr[2+(4*i)][model];
+        //Convert the atmospheric pressure from "mb" to "atm.":
+        getinput3_.p[i]   = tpvmr_init1_.tpvmr[2+(4*i)][model]/ 1013.;
         getinput3_.t[i]   = tpvmr_init1_.tpvmr[3+(4*i)][model];
-        getinput3_.vmr[i] = tpvmr_init1_.tpvmr[4+(4*i)][model];
+        //Convert the VMR from the ppm unit in the model to absolute unit
+        getinput3_.vmr[i] = tpvmr_init1_.tpvmr[4+(4*i)][model]*1.0E-06;
     }
 
     for (i=nb; i<MODELMAX;i++) {
@@ -659,7 +677,8 @@ int getModelNum(float lat, int32_t day) {
 }
 int init_atrem(int32_t sensorID, paramstr *P, l1str *l1rec, int32_t nbands) {
 
-    int32_t nb, atrem_opt=l1rec->input->atrem_opt,atrem_full=l1rec->input->atrem_full,atrem_geom=l1rec->input->atrem_geom;
+    int32_t nb, atrem_opt=l1rec->input->atrem_opt,atrem_full=l1rec->input->atrem_full, \
+            atrem_geom=l1rec->input->atrem_geom,atrem_splitpaths=l1rec->input->atrem_splitpaths;
     int32_t atrem_model=l1rec->input->atrem_model, gas_opt=l1rec->input->gas_opt;
     float xi,*fwave,*fwhm, *xppp, *lambda;
     float v,nwave;
@@ -864,6 +883,13 @@ int init_atrem(int32_t sensorID, paramstr *P, l1str *l1rec, int32_t nbands) {
 //    } else {
 //        nwave = rdatreminfo(sensorID, 0, "full_calc",    (void **) &full_calc);
 //    }
+
+    if (atrem_splitpaths > 0) {
+        if (atrem_full == 0) {
+            printf("ATREM: Turning on atrem_full because you selected atrem_splitpaths\n");
+            atrem_full = 1;
+        }
+    }
     if (atrem_full > 0)
         printf("ATREM: Warning : full_calc !=0. Atrem will calculate transmittance table for every pixel\n");
 
